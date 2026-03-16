@@ -1,0 +1,23 @@
+[project]
+name = "unity-msgpack-avro"
+version = "0.1.0"
+description = "Read Unity MsgPack Avro schemas and decode/encode compact msgpack"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "msgpack>=1.1.2",
+    "msgspec>=0.20.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=9.0.2"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/unity_msgpack_avro"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,14 @@
+[package]
+name = "rust-ffi-example"
+version = "0.1.0"
+edition = "2021"
+description = "Rust FFI example for UnityMsgpackSchemaExporter native library"
+
+[[bin]]
+name = "rust-ffi-example"
+path = "src/main.rs"
+
+[dependencies]
+hex = "0.4.3"
+# libloading: dynamic library loading (cross-platform, no CGo needed)
+libloading = "0.8"

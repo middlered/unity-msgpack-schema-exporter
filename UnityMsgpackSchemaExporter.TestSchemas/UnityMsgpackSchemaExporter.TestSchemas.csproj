@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net8.0</TargetFramework>
+        <AssemblyName>UnityMsgpackSchemaExporter.TestSchemas</AssemblyName>
+        <RootNamespace>UnityMsgpackSchemaExporter.TestSchemas</RootNamespace>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="MessagePack" Version="2.5.187"/>
+    </ItemGroup>
+
+</Project>

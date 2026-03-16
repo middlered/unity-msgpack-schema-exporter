@@ -1,0 +1,197 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (x.y.z)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  DOTNET_VERSION: '9.0.x'
+  PROJECT_LIB: UnityMsgpackSchemaExporter/UnityMsgpackSchemaExporter.csproj
+  PROJECT_CLI: UnityMsgpackSchemaExporter.Cli/UnityMsgpackSchemaExporter.Cli.csproj
+  PROJECT_NATIVE: UnityMsgpackSchemaExporter.Native/UnityMsgpackSchemaExporter.Native.csproj
+  PROJECT_TEST: UnityMsgpackSchemaExporter.Tests/UnityMsgpackSchemaExporter.Tests.csproj
+
+jobs:
+  # Run tests on Linux
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      - name: Restore
+        run: dotnet restore ${{ env.PROJECT_TEST }}
+      - name: Build
+        run: dotnet build ${{ env.PROJECT_TEST }} -c Release --no-restore
+      - name: Test
+        run: dotnet test ${{ env.PROJECT_TEST }} -c Release --no-build -v normal
+
+  # Build CLI for all platforms
+  build-cli:
+    needs: test
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+            artifact: unityMsgpackSchemaExporter
+          - os: ubuntu-latest
+            rid: linux-arm64
+            artifact: unityMsgpackSchemaExporter
+          - os: macos-latest
+            rid: osx-x64
+            artifact: unityMsgpackSchemaExporter
+          - os: macos-latest
+            rid: osx-arm64
+            artifact: unityMsgpackSchemaExporter
+          - os: windows-latest
+            rid: win-x64
+            artifact: unityMsgpackSchemaExporter.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      - name: Publish CLI
+        run: >
+          dotnet publish ${{ env.PROJECT_CLI }}
+          -c Release
+          -f net8.0
+          -r ${{ matrix.rid }}
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:PublishTrimmed=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -o dist/
+      - name: Package
+        shell: bash
+        run: |
+          cd dist
+          tar czf ../unityMsgpackSchemaExporter-cli-${{ matrix.rid }}.tar.gz *
+      - uses: actions/upload-artifact@v5
+        with:
+          name: cli-${{ matrix.rid }}
+          path: unityMsgpackSchemaExporter-cli-${{ matrix.rid }}.tar.gz
+
+  # Build NativeAOT shared library
+  build-native:
+    needs: test
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+            lib_ext: so
+          - os: macos-latest
+            rid: osx-x64
+            lib_ext: dylib
+          - os: macos-latest
+            rid: osx-arm64
+            lib_ext: dylib
+          - os: windows-latest
+            rid: win-x64
+            lib_ext: dll
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      - name: Install native dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
+      - name: Publish NativeAOT
+        run: >
+          dotnet publish ${{ env.PROJECT_NATIVE }}
+          -f net8.0
+          -c Release
+          -r ${{ matrix.rid }}
+          -o dist/
+      - name: Package
+        shell: bash
+        run: |
+          cd dist
+          tar czf ../UnityMsgpackSchemaExporter.Native-${{ matrix.rid }}.tar.gz *
+      - uses: actions/upload-artifact@v5
+        with:
+          name: native-${{ matrix.rid }}
+          path: UnityMsgpackSchemaExporter.Native-${{ matrix.rid }}.tar.gz
+
+  # Build NuGet package
+  build-nuget:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+          fi
+      - name: Pack CLI library
+        run: >
+          dotnet pack ${{ env.PROJECT_LIB }}
+          -c Release
+          -p:PackageVersion=${{ steps.version.outputs.version }}
+          -o nupkg/
+      - uses: actions/upload-artifact@v5
+        with:
+          name: nuget
+          path: nupkg/*.nupkg
+
+  # Create GitHub Release
+  release:
+    needs: [build-cli, build-native, build-nuget]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+            echo "tag=v${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+            echo "tag=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+          fi
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts/
+
+      - name: List artifacts
+        run: find artifacts/ -type f | sort
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: UnityMsgpackSchemaExporter ${{ steps.version.outputs.version }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            artifacts/cli-*/*.tar.gz
+            artifacts/native-*/*.tar.gz
+            artifacts/nuget/*.nupkg
